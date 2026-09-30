@@ -1,0 +1,11 @@
+fastapi
+uvicorn
+python-multipart
+opencv-python
+mediapipe
+numpy
+sounddevice
+soundfile
+groq
+python-dotenv
+requests
