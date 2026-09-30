@@ -1,0 +1,1004 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SAYN — Final Gesture Communication</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#070b14;color:#f4f7ff;font-family:Arial,sans-serif}
+.wrap{max-width:1150px;margin:auto;padding:18px}
+header{display:flex;justify-content:space-between;align-items:center;padding:12px 18px;border:1px solid #263149;border-radius:16px;background:#101727}
+.logo{font-size:24px;font-weight:800;letter-spacing:2px}.logo span{color:#63e6ff}
+#status{font-size:13px;color:#63e6ff}
+.hero{text-align:center;padding:18px 0}
+.hero h1{font-size:38px;margin:5px 0}.hero p{color:#aeb9ce}.tag{color:#63e6ff;font-weight:700}
+.grid{display:grid;grid-template-columns:1.35fr .9fr;gap:16px}
+.card{background:#101727;border:1px solid #263149;border-radius:18px;padding:16px}
+h2{font-size:18px;margin:0 0 12px}
+.camera{position:relative;aspect-ratio:16/9;background:#02050a;border-radius:14px;overflow:hidden}
+video,canvas{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+canvas{pointer-events:none}
+#cameraMessage{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#7f8ca5}
+.controls{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+button{border:0;border-radius:10px;padding:10px 14px;background:#202c43;color:white;font-weight:700;cursor:pointer}
+button:hover{filter:brightness(1.15)}
+.primary{background:#1287a5}.purple{background:#713bb2}.red{background:#ae3f50}
+.statusbox{margin-top:12px;padding:11px;border-radius:11px;background:#080e1a;color:#aeb9ce}
+.statusbox b{color:#63e6ff}
+.output{min-height:105px;background:#080e1a;border:1px solid #29364e;border-radius:12px;padding:13px}
+.label{font-size:11px;color:#8190a9;letter-spacing:1px}
+#message{font-size:25px;font-weight:700;margin-top:8px;word-break:break-word}
+#reply{margin-top:10px;color:#cbd4e4;line-height:1.5}
+.gestures{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px}
+.g{background:#0a1020;border:1px solid #263149;border-radius:10px;padding:9px;font-size:13px}
+.g b{color:#63e6ff;display:block;margin-bottom:3px}
+.notice{margin-top:12px;padding:10px;border-radius:10px;background:#111c2d;color:#aeb9ce;font-size:12px}
+@media(max-width:800px){.grid{grid-template-columns:1fr}.hero h1{font-size:30px}}
+</style>
+</head>
+<body>
+<div class="wrap">
+<header>
+  <div class="logo">SA<span>Y</span>N</div>
+  <div id="status">● READY</div>
+</header>
+
+<section class="hero">
+  <div class="tag">WHEN HANDS SPEAK, SAYN GIVES THEM A VOICE.</div>
+  <h1>AI Gesture Communication</h1>
+  <p>Gesture → word → sentence → AI → voice</p>
+</section>
+
+<div class="grid">
+<section class="card">
+  <h2>📷 LIVE VISION</h2>
+  <div class="camera">
+    <video id="video" autoplay playsinline muted></video>
+    <canvas id="canvas"></canvas>
+    <div id="cameraMessage">Press START CAMERA</div>
+  </div>
+  <div class="controls">
+    <button class="primary" id="cameraBtn">📷 START CAMERA</button>
+    <button id="captureBtn">✊ START WORD</button>
+    <button class="red" id="stopBtn">✋ STOP</button>
+  </div>
+  <div class="statusbox">
+    Gesture: <b id="gesture">Waiting...</b><br>
+    Mode: <b id="mode">Inactive</b>
+  </div>
+  <div class="notice" id="errorBox">SAYN ready. START WORD → H → E → L → L → O → STOP.</div>
+</section>
+
+<section class="card">
+  <h2>💬 COMMUNICATION</h2>
+  <div class="output">
+    <div class="label">CAPTURED MESSAGE</div>
+    <div id="message">—</div>
+    <div id="reply"></div>
+  </div>
+
+  <div class="controls">
+    <button class="purple" id="aiBtn">☝️ AI VOICE</button>
+    <button id="speakBtn">🔊 SPEAK</button>
+    <button class="red" id="clearBtn">CLEAR</button>
+  </div>
+
+  <h2 style="margin-top:18px">🤟 GESTURES</h2>
+  <div class="gestures">
+    <div class="g"><b>✊ START</b>Start word capture</div>
+    <div class="g"><b>✋ STOP</b>Finish sentence</div>
+    <div class="g"><b>👍 SPACE</b>Add a space</div>
+    <div class="g"><b>☝️ AI VOICE</b>Ask Groq AI</div>
+    <div class="g"><b>H</b>Index + middle</div>
+    <div class="g"><b>E</b>Index + middle + ring</div>
+    <div class="g"><b>L</b>Thumb + index</div>
+    <div class="g"><b>P</b>Thumb + index + middle</div>
+    <div class="g"><b>O</b>Thumb + index pinch</div>
+  </div>
+</section>
+</div>
+</div>
+
+<script type="module">
+import { HandLandmarker, FilesetResolver }
+from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.22-rc.20250304/vision_bundle.mjs";
+
+const API = "http://127.0.0.1:8000";
+const MODEL = "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task";
+
+const video = document.getElementById("video");
+const canvas = document.getElementById("canvas");
+const ctx = canvas.getContext("2d");
+
+const cameraBtn = document.getElementById("cameraBtn");
+const captureBtn = document.getElementById("captureBtn");
+const stopBtn = document.getElementById("stopBtn");
+const aiBtn = document.getElementById("aiBtn");
+const speakBtn = document.getElementById("speakBtn");
+const clearBtn = document.getElementById("clearBtn");
+
+const statusEl = document.getElementById("status");
+const gestureEl = document.getElementById("gesture");
+const modeEl = document.getElementById("mode");
+const messageEl = document.getElementById("message");
+const replyEl = document.getElementById("reply");
+const cameraMessage = document.getElementById("cameraMessage");
+const errorBox = document.getElementById("errorBox");
+
+let detector = null;
+let stream = null;
+let running = false;
+let letterMode = false;
+let sentence = "";
+
+let candidate = "";
+let candidateSince = 0;
+let stableGesture = "";
+let gestureLocked = false;
+let noHandSince = 0;
+
+let aiBusy = false;
+let lastAIVoiceAt = 0;
+
+function setError(text) {
+    errorBox.textContent = text;
+    console.log("SAYN:", text);
+}
+
+function render() {
+    messageEl.textContent = sentence || "—";
+}
+
+function dist(a, b) {
+    return Math.hypot(a.x - b.x, a.y - b.y);
+}
+
+function fingerUp(hand, tip, pip) {
+    return hand[tip].y < hand[pip].y;
+}
+
+/*
+ * THIS MATCHES THE WORKING SAYN PYTHON PROTOTYPE:
+ *
+ * AI VOICE = index only
+ * STOP     = 4 fingers
+ * START    = fist
+ * SPACE    = thumb up
+ * H        = index + middle
+ * E        = index + middle + ring
+ * L        = thumb + index
+ * P        = thumb + index + middle
+ *
+ * O is added as an extra pinch gesture.
+ */
+function recognizeGesture(hand) {
+    // Same core mapping as the SAYN Python prototype.
+    const index  = hand[8].y  < hand[6].y;
+    const middle = hand[12].y < hand[10].y;
+    const ring   = hand[16].y < hand[14].y;
+    const pinky  = hand[20].y < hand[18].y;
+
+    function d(a, b) {
+        return Math.hypot(
+            hand[a].x - hand[b].x,
+            hand[a].y - hand[b].y
+        );
+    }
+
+    const palmSize = Math.max(d(0, 9), 0.001);
+    const thumbExtended = d(4, 5) > palmSize * 0.75;
+    const extendedCount =
+        Number(index) + Number(middle) +
+        Number(ring) + Number(pinky);
+
+    // Extra O gesture: thumb + index pinch.
+    if (d(4, 8) < palmSize * 0.42) {
+        return "O";
+    }
+
+    // STOP = four fingers + extended thumb (open palm).
+    if (extendedCount === 4) {
+        return "STOP";
+    }
+
+    // START = closed fist.
+    if (extendedCount === 0 && !thumbExtended) {
+        return "START";
+    }
+
+    // SPACE = thumb only.
+    if (
+        thumbExtended &&
+        !index && !middle && !ring && !pinky &&
+        hand[4].y < hand[3].y
+    ) {
+        return "SPACE";
+    }
+
+    // H = index + middle.
+    if (
+        index && middle &&
+        !ring && !pinky &&
+        !thumbExtended
+    ) {
+        return "H";
+    }
+
+    // E = index + middle + ring.
+    if (
+        index && middle && ring &&
+        !pinky && !thumbExtended
+    ) {
+        return "E";
+    }
+
+    // L = thumb + index.
+    if (
+        thumbExtended && index &&
+        !middle && !ring && !pinky
+    ) {
+        return "L";
+    }
+
+    // P = thumb + index + middle.
+    if (
+        thumbExtended && index && middle &&
+        !ring && !pinky
+    ) {
+        return "P";
+    }
+
+    // AI VOICE = index only, but it is ignored while writing letters.
+    if (
+        index && !middle && !ring && !pinky
+    ) {
+        return "AI_VOICE";
+    }
+
+    return "UNKNOWN";
+}
+
+function acceptGesture(gesture) {
+
+    if (!gesture || gesture === "UNKNOWN") {
+        return;
+    }
+
+    // START
+    if (gesture === "START") {
+        letterMode = true;
+        sentence = "";
+        render();
+
+        modeEl.textContent = "LETTER MODE";
+        gestureEl.textContent = "START ✓";
+        setError("Letter recognition started.");
+        return;
+    }
+
+    // STOP
+    if (gesture === "STOP") {
+        if (letterMode) {
+            letterMode = false;
+
+            if (sentence && !sentence.endsWith(".")) {
+                sentence += ".";
+            }
+
+            render();
+            modeEl.textContent = "SENTENCE READY";
+            gestureEl.textContent = "STOP ✓";
+
+            if (sentence.trim()) {
+                speakText(sentence.trim());
+            }
+        }
+
+        return;
+    }
+
+    // AI VOICE
+    if (gesture === "AI_VOICE") {
+        const now = Date.now();
+
+        if (
+            !aiBusy &&
+            now - lastAIVoiceAt > 2500
+        ) {
+            lastAIVoiceAt = now;
+            startAIVoice();
+        }
+
+        return;
+    }
+
+    // Everything below is letter mode.
+    if (!letterMode) {
+        return;
+    }
+
+    if (gesture === "SPACE") {
+        if (
+            sentence &&
+            !sentence.endsWith(" ") &&
+            !sentence.endsWith(".")
+        ) {
+            sentence += " ";
+            render();
+            gestureEl.textContent = "SPACE ✓";
+        }
+
+        return;
+    }
+
+    const letters = {
+        H: "H",
+        E: "E",
+        L: "L",
+        P: "P",
+        O: "O"
+    };
+
+    if (letters[gesture]) {
+        sentence += letters[gesture];
+        render();
+
+        gestureEl.textContent =
+            letters[gesture] + " ✓ LETTER";
+
+        console.log(
+            "LETTER:",
+            letters[gesture],
+            "→",
+            sentence
+        );
+    }
+}
+
+/*
+ * Important:
+ * A gesture is accepted once, then the hand must leave
+ * that gesture before another identical gesture is accepted.
+ * This allows HELLO: H, E, L, release, L, release, O.
+ */
+function processGesture(gesture) {
+    const now = performance.now();
+
+    // No/uncertain hand: reset the repeat lock after release.
+    if (!gesture || gesture === "UNKNOWN") {
+        if (!noHandSince) noHandSince = now;
+        if (now - noHandSince >= 180) {
+            gestureLocked = false;
+            stableGesture = "";
+            candidate = "";
+            candidateSince = 0;
+        }
+        gestureEl.textContent = letterMode ? "Show next gesture..." : "Show your hand...";
+        return;
+    }
+
+    noHandSince = 0;
+
+    // Ignore the same sign until the user releases it.
+    if (gestureLocked && gesture === stableGesture) {
+        gestureEl.textContent = gesture + " ✓ (release)";
+        return;
+    }
+
+    // New gesture: require a short stable hold.
+    if (gesture !== candidate) {
+        candidate = gesture;
+        candidateSince = now;
+        gestureEl.textContent = gesture;
+        return;
+    }
+
+    if (now - candidateSince < 220) return;
+
+    stableGesture = gesture;
+    gestureLocked = true;
+    candidate = "";
+    candidateSince = 0;
+
+    // IMPORTANT: append the recognized letter immediately and visibly.
+    if (letterMode && ["H","E","L","P","O"].includes(gesture)) {
+        sentence += gesture;
+        messageEl.textContent = sentence;
+        gestureEl.textContent = gesture + " ✓ LETTER — " + sentence;
+        console.log("LETTER WRITTEN:", gesture, "=>", sentence);
+        return;
+    }
+
+    // Keep all control gestures working.
+    acceptGesture(gesture);
+}
+
+function drawHands(result) {
+
+    ctx.clearRect(
+        0,
+        0,
+        canvas.width,
+        canvas.height
+    );
+
+    const links = [
+        [0,1],[1,2],[2,3],[3,4],
+        [0,5],[5,6],[6,7],[7,8],
+        [5,9],[9,10],[10,11],[11,12],
+        [9,13],[13,14],[14,15],[15,16],
+        [13,17],[17,18],[18,19],[19,20],
+        [0,17]
+    ];
+
+    for (const hand of result.landmarks || []) {
+
+        ctx.strokeStyle = "#63e6ff";
+        ctx.lineWidth = 3;
+
+        for (const [a, b] of links) {
+            ctx.beginPath();
+            ctx.moveTo(
+                hand[a].x * canvas.width,
+                hand[a].y * canvas.height
+            );
+            ctx.lineTo(
+                hand[b].x * canvas.width,
+                hand[b].y * canvas.height
+            );
+            ctx.stroke();
+        }
+
+        ctx.fillStyle = "#ffffff";
+
+        for (const point of hand) {
+            ctx.beginPath();
+            ctx.arc(
+                point.x * canvas.width,
+                point.y * canvas.height,
+                3.5,
+                0,
+                Math.PI * 2
+            );
+            ctx.fill();
+        }
+    }
+}
+
+async function loadDetector() {
+
+    setError("Loading MediaPipe...");
+
+    const vision =
+        await FilesetResolver.forVisionTasks(
+            "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.22-rc.20250304/wasm"
+        );
+
+    detector =
+        await HandLandmarker.createFromOptions(
+            vision,
+            {
+                baseOptions: {
+                    modelAssetPath: MODEL,
+                    delegate: "CPU"
+                },
+
+                runningMode: "VIDEO",
+                numHands: 1,
+
+                minHandDetectionConfidence: 0.5,
+                minHandPresenceConfidence: 0.5,
+                minTrackingConfidence: 0.5
+            }
+        );
+
+    setError("MediaPipe loaded.");
+}
+
+async function startCamera() {
+
+    try {
+
+        if (!detector) {
+            await loadDetector();
+        }
+
+        stream =
+            await navigator.mediaDevices.getUserMedia({
+                video: {
+                    width: { ideal: 1280 },
+                    height: { ideal: 720 },
+                    facingMode: "user"
+                },
+                audio: false
+            });
+
+        video.srcObject = stream;
+
+        await video.play();
+
+        running = true;
+
+        cameraMessage.style.display = "none";
+        cameraBtn.textContent = "● CAMERA ACTIVE";
+        statusEl.textContent = "● ONLINE";
+
+        setError(
+            "Camera ready. Press START WORD or make ✊."
+        );
+
+        requestAnimationFrame(loop);
+
+    } catch (error) {
+
+        console.error(error);
+
+        statusEl.textContent = "● ERROR";
+
+        setError(
+            "Camera error: " +
+            (error.message || error.name)
+        );
+    }
+}
+
+async function loop() {
+
+    if (!running || !detector) {
+        return;
+    }
+
+    if (video.readyState >= 2) {
+
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+
+        const result =
+            detector.detectForVideo(
+                video,
+                performance.now()
+            );
+
+        drawHands(result);
+
+        const gesture =
+            result.landmarks?.length
+                ? recognizeGesture(result.landmarks[0])
+                : "";
+
+        await processGesture(gesture);
+    }
+
+    requestAnimationFrame(loop);
+}
+
+async function speakText(text) {
+
+    if (!text || !text.trim()) {
+        return;
+    }
+
+    try {
+
+        setError("Sending text to SAYN voice...");
+
+        const response =
+            await fetch(
+                API + "/speak",
+                {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json"
+                    },
+                    body: JSON.stringify({
+                        message: text
+                    })
+                }
+            );
+
+        if (response.ok) {
+
+            const blob =
+                await response.blob();
+
+            if (blob.size > 100) {
+
+                const url =
+                    URL.createObjectURL(blob);
+
+                const audio =
+                    new Audio(url);
+
+                audio.onended = () =>
+                    URL.revokeObjectURL(url);
+
+                await audio.play();
+
+                setError(
+                    "SAYN is speaking."
+                );
+
+                return;
+            }
+        }
+
+        throw new Error(
+            "Rime audio unavailable."
+        );
+
+    } catch (error) {
+
+        console.warn(error);
+
+        // Reliable browser fallback.
+        if ("speechSynthesis" in window) {
+
+            speechSynthesis.cancel();
+
+            const utterance =
+                new SpeechSynthesisUtterance(text);
+
+            utterance.lang = "en-US";
+            utterance.rate = 0.95;
+
+            speechSynthesis.speak(
+                utterance
+            );
+
+            setError(
+                "Browser voice is speaking only."
+            );
+        }
+    }
+}
+
+async function askAI(text) {
+
+    if (!text || !text.trim()) {
+        return;
+    }
+
+    replyEl.textContent =
+        "SAYN AI is thinking...";
+
+    try {
+
+        const response =
+            await fetch(
+                API + "/chat",
+                {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json"
+                    },
+                    body: JSON.stringify({
+                        message: text
+                    })
+                }
+            );
+
+        if (!response.ok) {
+            throw new Error(
+                "Chat HTTP " +
+                response.status
+            );
+        }
+
+        const data =
+            await response.json();
+
+        const answer =
+            (data.response || "").trim();
+
+        replyEl.textContent =
+            answer || "No AI response.";
+
+        if (answer) {
+            await speakText(answer);
+        }
+
+    } catch (error) {
+
+        console.error(error);
+
+        replyEl.textContent =
+            "AI connection failed.";
+
+        setError(error.message);
+    }
+}
+
+async function startAIVoice() {
+
+    aiBusy = true;
+
+    try {
+
+        statusEl.textContent =
+            "● AI VOICE";
+
+        modeEl.textContent =
+            "LISTENING";
+
+        gestureEl.textContent =
+            "☝️ AI VOICE";
+
+        setError(
+            "🎙️ Listening for 5 seconds..."
+        );
+
+        const mic =
+            await navigator.mediaDevices.getUserMedia({
+                audio: true
+            });
+
+        let mimeType = "";
+
+        if (
+            MediaRecorder.isTypeSupported(
+                "audio/webm;codecs=opus"
+            )
+        ) {
+            mimeType =
+                "audio/webm;codecs=opus";
+        } else if (
+            MediaRecorder.isTypeSupported(
+                "audio/webm"
+            )
+        ) {
+            mimeType =
+                "audio/webm";
+        }
+
+        const recorder =
+            mimeType
+                ? new MediaRecorder(
+                    mic,
+                    { mimeType }
+                )
+                : new MediaRecorder(mic);
+
+        const chunks = [];
+
+        recorder.ondataavailable =
+            event => {
+                if (event.data?.size) {
+                    chunks.push(event.data);
+                }
+            };
+
+        const stopped =
+            new Promise(resolve => {
+                recorder.onstop = resolve;
+            });
+
+        recorder.start();
+
+        await new Promise(
+            resolve =>
+                setTimeout(resolve, 5000)
+        );
+
+        if (
+            recorder.state !==
+            "inactive"
+        ) {
+            recorder.stop();
+        }
+
+        await stopped;
+
+        mic.getTracks().forEach(
+            track => track.stop()
+        );
+
+        const blob =
+            new Blob(
+                chunks,
+                {
+                    type:
+                        recorder.mimeType ||
+                        "audio/webm"
+                }
+            );
+
+        if (blob.size < 1000) {
+            throw new Error(
+                "No microphone audio captured."
+            );
+        }
+
+        const form =
+            new FormData();
+
+        form.append(
+            "file",
+            blob,
+            recorder.mimeType?.includes("webm")
+                ? "sayn_voice.webm"
+                : "sayn_voice.audio"
+        );
+
+        setError(
+            "🧠 Sending voice to Whisper..."
+        );
+
+        const transcription =
+            await fetch(
+                API + "/transcribe",
+                {
+                    method: "POST",
+                    body: form
+                }
+            );
+
+        if (!transcription.ok) {
+            throw new Error(
+                "Transcribe HTTP " +
+                transcription.status
+            );
+        }
+
+        const transcribed =
+            await transcription.json();
+
+        const question =
+            (transcribed.text || "").trim();
+
+        if (!question) {
+            throw new Error(
+                transcribed.error ||
+                "Whisper detected no speech."
+            );
+        }
+
+        replyEl.textContent =
+            "You: " + question;
+
+        setError(
+            "🤖 Asking SAYN AI..."
+        );
+
+        await askAI(question);
+
+    } catch (error) {
+
+        console.error(error);
+
+        replyEl.textContent =
+            "AI Voice error: " +
+            error.message;
+
+        setError(
+            "AI Voice error: " +
+            error.message
+        );
+
+    } finally {
+
+        aiBusy = false;
+
+        statusEl.textContent =
+            "● ONLINE";
+
+        modeEl.textContent =
+            letterMode
+                ? "LETTER MODE"
+                : "READY";
+    }
+}
+
+cameraBtn.addEventListener(
+    "click",
+    startCamera
+);
+
+captureBtn.addEventListener(
+    "click",
+    () => {
+        letterMode = true;
+        sentence = "";
+
+        candidate = "";
+        candidateSince = 0;
+        stableGesture = "";
+        gestureLocked = false;
+        noHandSince = performance.now();
+
+        render();
+
+        modeEl.textContent = "LETTER MODE";
+        gestureEl.textContent = "READY — show H";
+        setError(
+            "Letter recognition started. Show H, E, L, L, O."
+        );
+    }
+);
+
+stopBtn.addEventListener(
+    "click",
+    async () => {
+
+        letterMode = false;
+
+        candidate = "";
+        candidateSince = 0;
+        gestureLocked = false;
+
+        if (
+            sentence &&
+            !sentence.endsWith(".")
+        ) {
+            sentence += ".";
+        }
+
+        render();
+
+        modeEl.textContent =
+            "SENTENCE READY";
+
+        gestureEl.textContent =
+            "STOP ✓";
+
+        if (sentence.trim()) {
+            await speakText(
+                sentence.trim()
+            );
+        }
+    }
+);
+
+aiBtn.addEventListener(
+    "click",
+    () => {
+        if (!aiBusy) {
+            startAIVoice();
+        }
+    }
+);
+
+speakBtn.addEventListener(
+    "click",
+    () => {
+        speakText(
+            replyEl.textContent.trim() ||
+            sentence.trim()
+        );
+    }
+);
+
+clearBtn.addEventListener(
+    "click",
+    () => {
+
+        sentence = "";
+        letterMode = false;
+
+        candidate = "";
+        candidateSince = 0;
+        stableGesture = "";
+        gestureLocked = false;
+
+        replyEl.textContent = "";
+
+        modeEl.textContent =
+            "READY";
+
+        gestureEl.textContent =
+            "Waiting...";
+
+        render();
+
+        setError("Cleared.");
+    }
+);
+
+render();
+
+setError(
+    "SAYN ready. Start Camera → START WORD."
+);
+</script>
+</body>
+</html>
